@@ -1,0 +1,15 @@
+numpy
+scikit-learn
+datasets
+transformers
+evaluate
+nltk
+tensorboard
+wandb
+optimum
+accelerate
+torch
+bitsandbytes
+peft
+huggingface-hub
+trl
