@@ -6,16 +6,89 @@ from transformers import (
     set_seed
 )
 from tqdm import tqdm
-from model.models.train_sft.sft.train_sft import (
-    load_model as load_sft_model,
-    get_mcq_options,
-    ANSWER_TEMPLATE,
-    QUESTION_TEMPLATE
-)
+
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+##################################################################
+# DEBUGGING
+def dprint(*args, **kwargs):
+    if True:
+        print("[DEBUG eval_loss.py]", *args, **kwargs)
+##################################################################
 
 seed = 42
 
-def load_dataset(args, tokenizer):
+ANSWER_TEMPLATE = """### EXPLANATION
+<explanation>
+
+### ANSWER
+<correct_option>"""
+
+QUESTION_TEMPLATE = """### QUESTION
+<question>
+
+###OPTIONS
+<options>"""
+
+
+def get_mcq_options(samples):
+    """
+    Returns a dataset in the format:
+    {
+        "question": [str],
+        "options": [list[str]],
+        "correct_option": [str]
+        "explanation": [str]
+    }
+    """
+    questions_and_options = samples["question"]
+    remove_prefix = len("Question: ")
+    remove_suffix = len("\n\nAnswer")
+
+    questions_and_options = [question_and_options[remove_prefix:-remove_suffix] for question_and_options in questions_and_options]
+
+    questions_and_options = [question_and_options.split("\n\nOptions:\n") for question_and_options in questions_and_options]
+
+    questions, options = zip(*questions_and_options)
+    questions = list(questions)
+
+    options = list(options)
+    options = [opts.split("\n") for opts in options]
+    options = [[opt for opt in opts if opt != "" and opt != " "] for opts in options]
+
+    to_remove = ["A)", "B)", "C)", "D)", "E)", "F)", "A. ", "B. ", "C. ", "D. ", "E. ", "F. "]
+
+    for remove in to_remove:
+        options = [[opt.replace(remove, "") if opt.startswith(remove) else opt for opt in opts] for opts in options]
+
+    return {"question": questions, "options": options, "explanation": samples["explanation"], "correct_option": samples["answer"]}
+
+def load_sft_model(args):
+    model = AutoModelForCausalLM.from_pretrained(
+        args.adapter_model_name if args.adapter_model_name else args.base_model_name,
+        # quantization_config=bnb_config,
+        trust_remote_code=True,
+        # torch_dtype=torch.fp32,
+        torch_dtype=torch.float32,
+        device_map="auto",
+    )
+
+    print(model)
+    print(model.num_parameters())
+
+
+    tokenizer = AutoTokenizer.from_pretrained(args.adapter_model_name if args.adapter_model_name else args.base_model_name)
+    
+    dprint(f"EOS token: {tokenizer.eos_token}\tID: {tokenizer.eos_token_id}")
+    dprint(f"BOS token: {tokenizer.bos_token}\tID: {tokenizer.bos_token_id}")
+    dprint(f"PAD token: {tokenizer.pad_token}\tID: {tokenizer.pad_token_id}")
+    dprint(f"CHAT TEMPLATE: {tokenizer.chat_template}")
+    dprint()
+
+    return model, tokenizer
+
+def load_dataset_loss(args, tokenizer):
     def apply_template(samples):
         system = {"role": "system", "content": "You are a helpful EPFL chatbot."}
         messages = []
@@ -111,7 +184,7 @@ def main():
 
     model, tokenizer = load_sft_model(args)
 
-    dataset = load_dataset(args, tokenizer)
+    dataset = load_dataset_loss(args, tokenizer)
 
 
     avg_loss = calculate_losses(model, tokenizer, dataset, args)
