@@ -176,9 +176,9 @@ def load_model(args):
 
 
     peft_config = LoraConfig(
-        lora_alpha=16,
+        lora_alpha=50,
         lora_dropout=0.1,
-        r=16,
+        r=50,
         bias="none",
         task_type="CAUSAL_LM",
         target_modules="all-linear"
@@ -212,18 +212,16 @@ def main(args):
         gradient_accumulation_steps=args.effective_batch_size // 2,
         gradient_checkpointing=True,
         learning_rate=args.lr,
-        # weight_decay=5e-5,
-        # warmup_ratio=0.0,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type=args.lr_scheduler_type,
         num_train_epochs=3,
         logging_steps=5,
         log_level="info",
         logging_strategy="steps",
         save_strategy="steps",
         save_steps=200,
-        optim="paged_adamw_32bit",
+        optim=args.optim,
         warmup_steps=5,
-        max_grad_norm=1.0,
+        max_grad_norm=args.max_grad_norm,
         resume_from_checkpoint=args.resume_from_checkpoint,
         report_to="tensorboard",
         gradient_checkpointing_kwargs={"use_reentrant": True},
@@ -252,7 +250,6 @@ def main(args):
         train_dataset=train_dataset,
         eval_dataset=test_dataset,
         tokenizer=tokenizer,
-        # dataset_text_field="text",
         peft_config=peft_config,
         max_seq_length=2048,
         data_collator=collator
@@ -271,7 +268,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for training")
     parser.add_argument("--dataset_name", type=str, help="Dataset for training")
     parser.add_argument("--sample_quantity", type=int, default=None, help="Number of entries to sample")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
@@ -282,6 +279,9 @@ if __name__ == "__main__":
     parser.add_argument("--effective_batch_size", type=int, default=32, help="Effective batch size")
     parser.add_argument("--train_on_completions_only", type=bool, default=False, help="Whether to train on completions only")
     parser.add_argument("--packing", type=bool, default=False, help="Wether to use packing or not")
+    parser.add_argument("--lr_scheduler_type", type=str, default="cosine", help="Type of scheduler to use")
+    parser.add_argument("--optim", type=str, default="adamw_torch", help="Type of optimizer to use")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for gradient clipping")
 
 
     args = parser.parse_args()
