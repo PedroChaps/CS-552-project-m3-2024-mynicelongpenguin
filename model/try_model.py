@@ -3,6 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 import argparse
 from datasets import load_dataset
 from peft import PeftModel
+import random
 
 
 ANSWER_TEMPLATE = """### EXPLANATION
@@ -109,7 +110,7 @@ def load_dataset_loss(args, tokenizer):
             messages.append(tokenizer.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True))
 
         # return {"text": texts}
-        return {"messages": messages}
+        return {"messages": messages, "correct": samples["correct_option"]}
 
     dataset = load_dataset("json", data_files=args.dataset_name, split="train")
 
@@ -119,8 +120,15 @@ def load_dataset_loss(args, tokenizer):
 
     dataset = dataset.map(apply_template, batched=True, remove_columns=dataset.column_names)
 
-    entry = dataset[args.idx_question]["messages"]
-    return entry
+    if args.random_idx:
+        idx = random.randint(0, len(dataset))
+    
+    else:
+        idx = args.idx_question
+
+    entry = dataset[idx]["messages"]
+    correct = dataset[idx]["correct"]
+    return entry, correct, idx
 
 
 system_prompt = {"role": "system", "content": "You are a helpful EPFL chatbot."}
@@ -136,11 +144,13 @@ def main():
     parser.add_argument("--is_base_peft", type=bool, default=False, help="Base model")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
     parser.add_argument("--dataset_name", type=str, default="datasets/test_dataset.jsonl")
+    parser.add_argument("--random_idx", type=bool, default=False)
 
     args = parser.parse_args()  
 
+
     if args.use_template:
-        assert args.idx_question is not None, "Must provide index of question" 
+        assert (args.random_idx and not args.idx_question) or (not args.random_idx and args.idx_question), "Must provide either random index or index of question (and not both) if using template"
 
     if args.question and args.use_template:
         print("Question will not be used because using template")
@@ -153,15 +163,26 @@ def main():
     print()
 
     if args.use_template:
-        prompt = load_dataset_loss(args, tokenizer)
+        prompt, correct, idx = load_dataset_loss(args, tokenizer)
     else:
         prompt = tokenizer.apply_chat_template([system_prompt, {"role": "user", "content": args.question}], tokenize=False, add_generation_prompt=True)
+        idx = None
     
     
     print("### PROMPT#################")
     print(prompt)
     print("###########################")
     print()
+
+    if idx:
+        print("### DATASET INDEX#################")
+        print(idx)
+        print("###########################")
+        print()
+        print("### CORRECT OPTION#################")
+        print(correct)
+        print("###########################")
+        print()
 
     input_ids = tokenizer(prompt, return_tensors="pt", return_attention_mask=False).input_ids.to(model.device)
 
@@ -175,11 +196,25 @@ def main():
     print("################################")
     print()
 
+    # generation_config = GenerationConfig(
+    #     eos_token_id = tokenizer.eos_token_id,
+    #     pad_token_id = tokenizer.pad_token_id,
+    #     num_beams = 10,
+    #     num_beam_groups = 5,
+    #     max_new_tokens = 500,
+    #     diversity_penalty = 0.5,
+    #     repetition_penalty = 1.2,
+    # )
+
     generation_config = GenerationConfig(
         eos_token_id = tokenizer.eos_token_id,
         pad_token_id = tokenizer.pad_token_id,
-        num_beams = 1,
-        max_new_tokens = 500
+        do_sample=True,
+        max_new_tokens = 500,
+        temperature = 0.7,
+        top_p = 0.95,
+        top_k = 50,
+        repetition_penalty = 1.2,
     )
 
     print("### GENERATION CONFIG ###########")

@@ -16,11 +16,12 @@ source ~/venvs/venv_evaluator/bin/activate
 
 echo "Going to run..."
 
+    # --is_base_peft True 
+    # --base_model_name "pleaky2410/TeachersHateChatbots" \
+    # --idx_question 12023 \
 python try_model.py --use_template True \
-    --idx_question 1243 \
-    --adapter_model_name "./models/train_sft/outputs/sft_all_SciQ"  \
-    --base_model_name "pleaky2410/TeachersHateChatbots" \
-    --is_base_peft True 
+    --adapter_model_name "./models/train_sft/outputs/sft_model_3998_base"  \
+    --random_idx True
 
 echo "Evaluator run"
 
