@@ -488,7 +488,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                             if not force_answer:
                                 bad_responses_input_ids.append((i, input_ids[i]))
                             else:
-                                results.append(i, "A")
+                                results.append((i, "A"))
                 
                     else:
                         print("Exception occured!")
