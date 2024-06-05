@@ -1,16 +1,13 @@
 import random
+import json
+from datasets import load_dataset
 
-random.seed(42)
 
-data = []
-with open("test_dataset.jsonl", "r") as f:
-    for line in f:
-        data.append(line)
+dataset = load_dataset("json", data_files="test_dataset.jsonl", split="train")
+dataset = dataset.shuffle(seed=42).select(range(5000)).remove_columns("related")
 
-random.shuffle(data)
-
-data = data[:5000]
 
 with open("test_dataset_min.jsonl", "w") as f:
-    f.write("".join(data))
+    for record in dataset:
+        f.write(json.dumps(record) + '\n')
 
