@@ -1,9 +1,11 @@
+from multiprocessing import process
+from os import truncate
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import time
 
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, GenerationConfig
 from models.model_base import PreTrainedModelWrapper
 # from tlr import DPOTrainer
 
@@ -381,24 +383,257 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             Returns:
                 output_dict (`dict`): A dictionary containing the model predictions given input questions.
             """
-            output_dict = {"preds": []}
-
             ########################################################################
             # TODO: Please implement the prediction step that generates the prediction of the given MCQA question
             # ======================================================================
             # You need to return one letter prediction for each question.
             # ======================================================================
-            raise NotImplementedError
+            #TODO: make sure the template of the questions the teachers are going to provide is EXACTLY THE SAME as the one we are using here 
+            # I am guiding myself by what our training datasets have, adapt  otherwise
             ########################################################################
+            QUESTION_TEMPLATE = """### QUESTION
+            <question>
 
-            return output_dict
+            ###OPTIONS
+            <options>"""
+
+            #############################################################################################################################################
+
+            def get_mcq_options(samples):
+                """
+                Returns a dataset in the format:
+                {
+                    "question": [str],
+                    "options": [list[str]],
+                    "correct_option": [str]
+                    "explanation": [str]
+                }
+                """
+                questions_and_options = samples["question"]
+                remove_prefix = len("Question: ")
+                remove_suffix = len("\n\nAnswer")
+
+                #remove the preffix and suffix from questions and options
+                questions_and_options = [question_and_options[remove_prefix:-remove_suffix] for question_and_options in questions_and_options]
+
+                #separate into questions and options
+                questions_and_options = [question_and_options.split("\n\nOptions:\n") for question_and_options in questions_and_options]
+
+                questions, options = zip(*questions_and_options)
+                questions = list(questions)
+
+                #split options into a list
+                options = list(options)
+                options = [opts.split("\n") for opts in options]
+                options = [[opt for opt in opts if opt != "" and opt != " "] for opts in options]
+
+                #remove the option identifier
+                to_remove = ["A)", "B)", "C)", "D)", "E)", "F)", "A. ", "B. ", "C. ", "D. ", "E. ", "F. "]
+
+                for remove in to_remove:
+                    options = [[opt.replace(remove, "") if opt.startswith(remove) else opt for opt in opts] for opts in options]
+
+                return {"question": questions, "options": options, "explanation": samples["explanation"], "correct_option": samples["answer"]}
+            
+            #############################################################################################################################################
+
+            def apply_template(samples):
+                system = {"role": "system", "content": "You are a helpful EPFL chatbot."}
+                messages = []
+
+                #apply question template
+                for i, question in enumerate(samples["question"]):
+                    prompt = QUESTION_TEMPLATE.replace("<question>", question)
+                    options=""
+                    for j, opt in enumerate(samples["options"][i]):
+                        options += f"{chr(ord('A') + j)}: {opt}\n"
+
+                    prompt = prompt.replace("<options>", options)
+
+                    conversation = [system]
+                    conversation.append({"role": "user", "content": prompt})
+                    messages.append(tokenizer.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True))
+
+                return messages
+            #############################################################################################################################################
+
+            def get_answers(input_ids, answers, processed_batch_opts, force_answer=False):
+                """
+                Extracts the answer from the output of the model.
+                If the output is mal-formed, either returns the input_ids and index of the mal-formed output if force_answer is False, or "A" otherwise
+                """
+                bad_responses_input_ids = []
+                results = []
+                print(f"{answers[0] = }")
+                for i, answer in answers:
+                    trigger = "### ANSWER\n" 
+                    start_idx = answer.find(trigger)
 
 
+                    #if the template for the correct option was found, get the character after that
+                    if start_idx != -1:
+                        option = answer[start_idx + len(trigger): start_idx + len(trigger) + 1] 
 
+                        #check if the model returned a lower case option
+                        option = option.upper() if option.islower() else option
 
+                        #check if option is among the possible options
+                        length_options = len(processed_batch_opts[i])
+                        option_idx = ord(option) - ord("A")
 
+                        if option_idx < length_options:
+                            results.append((i, option))
+                        else:
+                            print("Option not among the possible options!")
+                            if not force_answer:
+                                bad_responses_input_ids.append((i, input_ids[i]))
+                            else:
+                                results.append(i, "A")
+                
+                    else:
+                        print("Exception occured!")
+                        if not force_answer:
+                            bad_responses_input_ids.append((i, input_ids[i]))
+                        else:
+                            results.append((i, "A"))
+                
+                if not force_answer:
+                    return results, bad_responses_input_ids
 
+                else:
+                    return results
+            #############################################################################################################################################
 
+            def pad2dtensors(tensors, pad_token_id):
+                """
+               Pads a list of tensors to the same length (the maximum length)
+                """
+                max_len = max([tensor.size(1) for tensor in tensors])
+                padded_tensors = []
+                for tensor in tensors:
+                    if tensor.size(1) == max_len:
+                        padded_tensors.append(tensor)
+                        continue
+                    pad_tensor = torch.tensor([pad_token_id] * (max_len - tensor.size(1))).unsqueeze(0).expand(tensor.shape[0], -1).to(tensor.device)
+                    padded_tensor = torch.cat([tensor, pad_tensor], dim=1)
+                    padded_tensors.append(padded_tensor)
+                return padded_tensors
+            #############################################################################################################################################
+
+            self.pretrained_model.to(torch.device("cuda"))
+
+            processed_batch = get_mcq_options(batch)
+            processed_batch_opts = processed_batch["options"]
+            
+            prompts = apply_template(processed_batch)
+
+            print(f"{prompts = }")
+
+            #When running, I get the following warning, soemthing along the lines of: Please set the padding side to left for correct generation as this is a decoder-only model
+            tokenizer.padding_side = "left"
+            all_input_ids = tokenizer(prompts, padding=True, truncation=True, max_length = 1024,  return_tensors="pt", return_attention_mask=False).input_ids.to(self.pretrained_model.device)
+
+            
+            #TODO: define best generation config
+            generation_config = GenerationConfig(
+                eos_token_id = tokenizer.eos_token_id,
+                pad_token_id = tokenizer.pad_token_id,
+                num_beams = 10,
+                num_beam_groups = 5,
+                max_new_tokens = 1023,
+                diversity_penalty = 0.5,
+                repetition_penalty = 1.8,
+                early_stopping=True,
+                no_repeat_ngram_size = 5
+            )
+
+            #the most strict config to try to get an answer if the used config fails (greedy decoding)
+            fallback_config = GenerationConfig(
+                eos_token_id = tokenizer.eos_token_id,
+                pad_token_id = tokenizer.pad_token_id,
+                num_beams = 1,
+                repetition_penalty = 1.5,
+                max_new_tokens = 1023,
+                no_repeat_ngram_size = 5
+            )
+                
+            #do the generation in smaller batches to avoid OOM
+            batch_size = 2
+            answer = []
+            with torch.no_grad():
+                for i in range(0, len(all_input_ids), batch_size):
+                    max_idx = min(len(all_input_ids), i + batch_size)
+                    answer.append(self.pretrained_model.generate(inputs=all_input_ids[i : max_idx], generation_config=generation_config, tokenizer=tokenizer))
+            
+            #concatenate all tensors in one as if the generation was done in a full batch
+            answer = [a.unsqueeze(0).detach() if a.dim() == 1 else a.detach() for a in answer]
+            if len(answer) > 1:
+                answer = torch.cat(pad2dtensors(answer, tokenizer.pad_token_id), dim=0)
+            else:
+                answer = answer[0]
+                
+            answers = tokenizer.batch_decode(answer, skip_special_tokens=False)
+
+            answers = list(enumerate(answers))
+
+            #extract answers
+            results, bad_responses_input_ids = get_answers(all_input_ids, answers, processed_batch_opts)
+
+            # print(f"{results = }")
+
+            
+            #if all the answers are well formed, we return
+            if len(results) == len(answers):
+                results = [result[1] for result in results]
+                return {"preds": results}
+
+            #else, we try the failed ones with the fallback config
+            idxs_bad_responses, input_ids = zip(*bad_responses_input_ids)
+            idxs_bad_responses = list(idxs_bad_responses)
+
+            input_ids = [input_id.unsqueeze(0) if input_id.dim() == 1 else input_id for input_id in input_ids]
+
+            #do not need to pad as they all have the same size (due to tokenizer padding)
+            if len(input_ids) > 1:
+                input_ids = torch.cat(input_ids, dim=0)
+            else:
+                input_ids = input_ids[0]
+
+            #do the same to avoid OOM
+            answer = []
+            with torch.no_grad():
+                for i in range(0, len(input_ids), batch_size):
+                    max_idx = min(len(input_ids), i + batch_size)
+                    answer.append(self.pretrained_model.generate(inputs=input_ids[i : max_idx], generation_config=fallback_config, tokenizer=tokenizer))
+            
+            #concatenate all tensors in one as if the generation was done in a full batch
+            answer = [a.unsqueeze(0).detach() if a.dim() == 1 else a.detach() for a in answer]
+
+            if len(answer) > 1:
+                answer = torch.cat(pad2dtensors(answer, tokenizer.pad_token_id), dim=0)
+            else:
+                answer = answer[0]
+
+            answers = tokenizer.batch_decode(answer, skip_special_tokens=False)
+
+            answers = list(zip(idxs_bad_responses, answers))
+
+            #get all the missing results (if not found again, we return 'A')
+            results_bad_responses = get_answers(all_input_ids, answers, processed_batch_opts, force_answer=True)
+            results += results_bad_responses
+            # print(f"{results_bad_responses = }")
+            # print(f"{results = }")
+
+            assert len(results) == len(batch["question"])
+
+            
+            #sort them back
+            results.sort(key=lambda x: x[0])
+            results = [result[1] for result in results]
+
+            print(results)
+
+            return {"preds": results}
 
 
 
