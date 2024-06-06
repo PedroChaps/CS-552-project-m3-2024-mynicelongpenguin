@@ -531,7 +531,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
 
             #When running, I get the following warning, soemthing along the lines of: Please set the padding side to left for correct generation as this is a decoder-only model
             tokenizer.padding_side = "left"
-            all_input_ids = tokenizer(prompts, padding=True, truncation=True, max_length = 1024,  return_tensors="pt", return_attention_mask=False).input_ids.to(self.pretrained_model.device)
+            all_input_ids = tokenizer(prompts, padding=True, truncation=True, max_length = 1024,  return_tensors="pt", return_attention_mask=False).input_ids
 
             
             #TODO: define best generation config
@@ -563,10 +563,10 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             with torch.no_grad():
                 for i in range(0, len(all_input_ids), batch_size):
                     max_idx = min(len(all_input_ids), i + batch_size)
-                    answer.append(self.pretrained_model.generate(inputs=all_input_ids[i : max_idx], generation_config=generation_config, tokenizer=tokenizer))
+                    answer.append(self.pretrained_model.generate(inputs=all_input_ids[i : max_idx].to(self.pretrained_model.device), generation_config=generation_config, tokenizer=tokenizer))
             
             #concatenate all tensors in one as if the generation was done in a full batch
-            answer = [a.unsqueeze(0).detach() if a.dim() == 1 else a.detach() for a in answer]
+            answer = [a.unsqueeze(0).detach().cpu() if a.dim() == 1 else a.detach().cpu() for a in answer]
             if len(answer) > 1:
                 answer = torch.cat(pad2dtensors(answer, tokenizer.pad_token_id), dim=0)
             else:
@@ -604,10 +604,10 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             with torch.no_grad():
                 for i in range(0, len(input_ids), batch_size):
                     max_idx = min(len(input_ids), i + batch_size)
-                    answer.append(self.pretrained_model.generate(inputs=input_ids[i : max_idx], generation_config=fallback_config, tokenizer=tokenizer))
+                    answer.append(self.pretrained_model.generate(inputs=input_ids[i : max_idx].to(self.pretrained_model.device), generation_config=fallback_config, tokenizer=tokenizer))
             
             #concatenate all tensors in one as if the generation was done in a full batch
-            answer = [a.unsqueeze(0).detach() if a.dim() == 1 else a.detach() for a in answer]
+            answer = [a.unsqueeze(0).detach().cpu() if a.dim() == 1 else a.detach().cpu() for a in answer]
 
             if len(answer) > 1:
                 answer = torch.cat(pad2dtensors(answer, tokenizer.pad_token_id), dim=0)
