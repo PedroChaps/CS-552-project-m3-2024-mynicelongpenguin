@@ -406,7 +406,6 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                     "question": [str],
                     "options": [list[str]],
                     "correct_option": [str]
-                    "explanation": [str]
                 }
                 """
                 questions_and_options = samples["question"]
@@ -433,7 +432,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 for remove in to_remove:
                     options = [[opt.replace(remove, "") if opt.startswith(remove) else opt for opt in opts] for opts in options]
 
-                return {"question": questions, "options": options, "explanation": samples["explanation"], "correct_option": samples["answer"]}
+                return {"question": questions, "options": options, "correct_option": samples["answer"]}
             
             #############################################################################################################################################
 
