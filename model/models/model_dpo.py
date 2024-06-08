@@ -540,8 +540,8 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 num_beams = 10,
                 num_beam_groups = 5,
                 max_new_tokens = 1023,
-                diversity_penalty = 0.5,
-                repetition_penalty = 1.8,
+                diversity_penalty = 1.0,
+                repetition_penalty = 1.2,
                 early_stopping=False,
                 no_repeat_ngram_size = 5
             )
