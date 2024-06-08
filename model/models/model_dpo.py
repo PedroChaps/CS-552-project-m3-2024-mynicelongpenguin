@@ -542,7 +542,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 max_new_tokens = 1023,
                 diversity_penalty = 0.5,
                 repetition_penalty = 1.8,
-                early_stopping=True,
+                early_stopping=False,
                 no_repeat_ngram_size = 5
             )
 
@@ -564,6 +564,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                     max_idx = min(len(all_input_ids), i + batch_size)
                     answer.append(self.pretrained_model.generate(inputs=all_input_ids[i : max_idx].to(self.pretrained_model.device), generation_config=generation_config, tokenizer=tokenizer))
             
+            all_input_ids = all_input_ids.cpu()
             #concatenate all tensors in one as if the generation was done in a full batch
             answer = [a.unsqueeze(0).detach().cpu() if a.dim() == 1 else a.detach().cpu() for a in answer]
             if len(answer) > 1:
