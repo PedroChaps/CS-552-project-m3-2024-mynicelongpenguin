@@ -1,18 +1,14 @@
-import tokenize
-from datasets import load_dataset, load_from_disk, concatenate_datasets, Dataset
-import gpt_wrapper
-from gpt_wrapper.chat import Chat
-import tqdm
-import random
+from datasets import load_dataset, concatenate_datasets, Dataset
 import os
 import evaluate
+from requests import get
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 from peft import PeftModel
 import torch
 import sys
+import torch
 
-
-from bert_score import BERTScorer
+import json
 
 import argparse
 
@@ -30,6 +26,17 @@ ANSWER_TEMPLATE = """### EXPLANATION
 
 ### ANSWER
 <correct_option>"""
+
+
+def get_average_metrics(datasets, metrics_files):
+    def get_avg_per_dataset(dataset):
+        avg_metrics = {key: sum([entry[key] for entry in dataset]) / len(dataset) for key in dataset.column_names if key not in ("model_answer", "expected")}
+        return avg_metrics
+    average_metrics = [get_avg_per_dataset(dataset) for dataset in datasets]
+    average_metrics = {metrics_files[i]: average_metrics[i] for i in range(len(metrics_files))}
+    return average_metrics
+
+
 
 def get_mcq_options(samples):
     """
@@ -130,8 +137,6 @@ def load_sft_model(args):
         )
 
         print(model)
-        print(model.num_parameters())
-
 
     tokenizer = AutoTokenizer.from_pretrained(args.adapter_model_name if args.adapter_model_name else args.base_model_name)
     
@@ -162,22 +167,22 @@ def make_inference(dataset, dataset_idxs, model, tokenizer):
     expecteds = [dataset[dataset_idx]["expected"] for dataset_idx in dataset_idxs]
 
     generation_config = GenerationConfig(
-        eos_token_id = tokenizer.eos_token_id,
-        pad_token_id = tokenizer.pad_token_id,
-        num_beams = 10,
-        num_beam_groups = 5,
-        max_new_tokens = 500,
-        diversity_penalty = 0.5,
-        repetition_penalty = 1.2,
-        no_ngram_repeat_size=5
+            eos_token_id = tokenizer.eos_token_id,
+            pad_token_id = tokenizer.pad_token_id,
+            num_beams = 10,
+            num_beam_groups = 5,
+            max_new_tokens = 500,
+            diversity_penalty = 1.0,
+            repetition_penalty = 1.2,
+            early_stopping=False,
+            no_repeat_ngram_size = 5
     )
 
-    input_ids = tokenizer(prompts, return_tensors="pt", return_attention_mask=False).input_ids.to(model.device)
-
-    
     with torch.no_grad():
-        answer = model.generate(inputs=input_ids, generation_config=generation_config, tokenizer=tokenizer)
-    model_answers = tokenizer.batch_decode(answer, skip_special_tokens=True)
+        tokenizer.padding_side = "left"
+        input_ids = tokenizer(prompts, return_tensors="pt", return_attention_mask=False, truncation=True, padding=True, max_length=1024).input_ids.to(model.device)
+        answer = model.generate(inputs=input_ids, generation_config=generation_config)
+        model_answers = tokenizer.batch_decode(answer, skip_special_tokens=True)
 
     return model_answers, expecteds
 
@@ -207,38 +212,22 @@ def calculate_COMMET_metric(chosen_dataset, model_outputs):
     ...
 
 def calculate_BERTScore(dataset):
+
     
-    def calculate_BERTScore_for_row(row):
+    def calculate_BERTScore_for_rows(rows):
         
-        answer1 = row["answer1"]
-        answer2 = row["answer2"]
+        answer1 = rows["answer1"]
+        answer2 = rows["answer2"]
         
-        scorer = BERTScorer(model_type="bert-base-uncased")
-        P, R, F1 = scorer.score([answer1], [answer2])
+        scorer = evaluate.load("bertscore")
+        results = scorer.compute(predictions=answer1, references=answer2, model_type="bert-base-uncased") 
+       
+        answer = {"BERTScore_P": results["precision"], "BERTScore_R": results["recall"], "BERTScore_F1": results["f1"]} 
         
-        row["BERTScore_P"] = P[0]
-        row["BERTScore_R"] = R[0]
-        row["BERTScore_F1"] = F1[0]
-        
-        return row
+        return answer
     
-    
-    dataset = dataset.map(lambda x: calculate_BERTScore_for_row(x), num_proc=32)
-    
-    # Does statistics on the dataset i.e. prints the average values
-    # total_P, total_R, total_F1, total_entries = 0, 0, 0, 0
-    # for entry in dataset:
-    #     total_P += entry["BERTScore_P"]
-    #     total_R += entry["BERTScore_R"]
-    #     total_F1 += entry["BERTScore_F1"]
-    #     total_entries += 1
-    
-    # print(f"{color.BOLD}### BERTScore ###{color.END}")
-    # print(f"{color.BOLD}Total:{color.END}{color.GREEN} {total_entries} entries {color.END}")
-    # print(f"{color.BOLD}Average BERTScore P:{color.END}{color.GREEN} {total_P / total_entries}{color.END}")
-    # print(f"{color.BOLD}Average BERTScore R:{color.END}{color.GREEN} {total_R / total_entries}{color.END}")
-    # print(f"{color.BOLD}Average BERTScore F1:{color.END}{color.GREEN} {total_F1 / total_entries}{color.END}")
-    # print()
+
+    dataset = dataset.map(lambda x: calculate_BERTScore_for_rows(x), batched=True, batch_size = 8)
     
     return dataset
     
@@ -260,18 +249,6 @@ def calculate_BLEU(dataset):
     
     
     dataset = dataset.map(lambda x: calculate_BLEU_for_row(x), num_proc=32)
-    
-    # Does statistics on the dataset i.e. prints the average BLEU value
-    # total_BLEU, total_entries = 0, 0
-    # for entry in dataset:
-    #     total_BLEU += entry["BLEU"]
-    #     total_entries += 1
-    
-    # print(f"{color.BOLD}### BLEU ###{color.END}")
-    # print(f"{color.BOLD}Total:{color.END}{color.GREEN} {total_entries} entries {color.END}")
-    # print(f"{color.BOLD}Average BLEU:{color.END}{color.GREEN} {total_BLEU / total_entries}{color.END}")
-    # print()
-    
     return dataset
 
 
@@ -295,22 +272,6 @@ def calculate_ROUGE(dataset):
     
     
     dataset = dataset.map(lambda x: calculate_ROUGUE_for_row(x), num_proc=32)
-    
-    # Does statistics on the dataset i.e. prints the average ROUGE values
-    # total_ROUGE_1, total_ROUGE_2, total_ROUGE_L, total_entries = 0, 0, 0, 0
-    # for entry in dataset:
-    #     total_ROUGE_1 += entry["ROUGE-1"]
-    #     total_ROUGE_2 += entry["ROUGE-2"]
-    #     total_ROUGE_L += entry["ROUGE-L"]
-    #     total_entries += 1
-    
-    # print(f"{color.BOLD}### ROUGE ###{color.END}")
-    # print(f"{color.BOLD}Total:{color.END}{color.GREEN} {total_entries} entries {color.END}")
-    # print(f"{color.BOLD}Average ROUGE-1:{color.END}{color.GREEN} {total_ROUGE_1 / total_entries}{color.END}")
-    # print(f"{color.BOLD}Average ROUGE-2:{color.END}{color.GREEN} {total_ROUGE_2 / total_entries}{color.END}")
-    # print(f"{color.BOLD}Average ROUGE-L:{color.END}{color.GREEN} {total_ROUGE_L / total_entries}{color.END}")
-    # print()
-    
     return dataset
 
 
@@ -344,60 +305,77 @@ def main():
     
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--exp_inferences_path", type=str, required=True, help="The path for the file with the expected inferences")
+    # parser.add_argument("--exp_inferences_path", type=str, required=True, help="The path for the file with the expected inferences")
     parser.add_argument("--output", type=str, required=True, help="The file to save the output to")
     parser.add_argument("--batch_size", type=int, default=8, help="The batch size to do inference and evaluation with")
     parser.add_argument("--adapter_model_name", type=str, default=None, help="Base model")
     parser.add_argument("--base_model_name", type=str, default="rhysjones/phi-2-orange-v2", help="Base model")
     parser.add_argument("--is_base_peft", type=bool, default=False, help="Base model")
-
+    parser.add_argument("--dataset_name", type=str, help="The path for the file with the expected inferences")
+    parser.add_argument("--seed", type=int, default=42, help="The seed for reproducatibility")
+    parser.add_argument("--sample_quantity", type=int, default=None, help="Amount of samples to use for evaluation. If not set, use all")
+    parser.add_argument("--get_average_metrics", type=bool, default=False, help="Given metrics file, get average metrics")
+    parser.add_argument("--metrics_files", type=str, default=None, help="Comma separated metrics file name")
 
     args = parser.parse_args()
+
+    if args.get_average_metrics:
+        assert args.metrics_files is not None
+        metrics_files = args.metrics_files.split(",")
+        datasets = [load_dataset("json", data_files=metrics_file, split="train") for metrics_file in metrics_files]
+
+        avg_metrics = get_average_metrics(datasets, metrics_files) 
+
+        with open(args.output, "w") as f:
+            json.dump(avg_metrics, f, indent=4)
+        
+        return
+
+
+    model, tokenizer = load_sft_model(args)
     
-    exp_inferences_dataset = load_dataset("json", data_files=args.exp_inferences_path, split="train")
+    # exp_inferences_dataset = load_dataset("json", data_files=args.exp_inferences_path, split="train")
+    exp_inferences_dataset = create_datasets(args, tokenizer)
     
     # It is assumed to have the "question" and "answer" columns
     assert "prompt" in exp_inferences_dataset[0] and "expected" in exp_inferences_dataset[0]
     
-    # TODO: uncomment me
-    # model, tokenizer = load_sft_model(args)
-    
-    # Creates an empty dataset that we will be concatenating stuff with
-    final_dataset = Dataset.from_dict({"answer1": [], "answer2": []})
-        
-    
+    model_answers = []
+    expecteds = []
     for i in range(0, len(exp_inferences_dataset), args.batch_size):
-        
         real_batch_size = min(args.batch_size, len(exp_inferences_dataset) - i)
-        
-        # TODO: uncomment me
-        # model_answers, expecteds = make_inference(exp_inferences_dataset, range(i, i + real_batch_size), model, tokenizer)
-        model_answers, expecteds = ["I like turtles", "fireflies are cool"], ["I like trains", "Olha uma avioneta"]
-        
-        # Creates a dataset with "answer1" and "answer2" to fit the expected format of the `calculate_...` functions
-        dataset = Dataset.from_dict({"answer1": model_answers, "answer2": expecteds})
-        
-        # Make calculations for this batch
-        dataset = calculate_ROUGE(dataset)
-        dataset = calculate_BLEU(dataset)
-        # TODO uncomment me
-        # dataset = calculate_BERTScore(dataset)
-        
-        # Merge this batch with the final dataset
-        final_dataset = concatenate_datasets([final_dataset, dataset])
-        
-        # Subtracts 2 because of "answer1" and "answer2"
-        # n_metrics = len(final_dataset[0]) - 2
-        avg_metrics = {key: sum([entry[key] for entry in final_dataset]) / len(final_dataset) for key in final_dataset[0] if key not in ("answer1", "answer2")}
-        
-        print(f"{color.BOLD}### AVERAGE METRICS ###{color.END}")
-        print(f"Processed entries: {len(final_dataset)}")
-        for key in avg_metrics:
-            print(f"{color.BOLD}{key}{color.END}: {color.GREEN}{avg_metrics[key]}{color.END}")
-        
-
+        model_answer, expected = make_inference(exp_inferences_dataset, range(i, i + real_batch_size), model, tokenizer)
+        model_answers += model_answer
+        expecteds += expected
     
+    print(f"{len(model_answers) = }")
+    print(f"{len(expecteds) = }")
+
+    del model
+    del tokenizer
+    torch.cuda.empty_cache()
+
+    dataset = Dataset.from_dict({"answer1": model_answers, "answer2": expecteds})
+
+    dataset = calculate_ROUGE(dataset)
+    dataset = calculate_BLEU(dataset)
+    dataset = calculate_BERTScore(dataset)
+
+    print(f"{len(dataset) = }")
+    print(f"{dataset.column_names = }")
+
+    avg_metrics = {key: sum([entry[key] for entry in dataset]) / len(dataset) for key in dataset[0] if key not in ("answer1", "answer2")}
+
+
+    print(f"{color.BOLD}### AVERAGE METRICS ###{color.END}")
+    print(f"Processed entries: {len(dataset)}")
+    for key in avg_metrics:
+        print(f"{color.BOLD}{key}{color.END}: {color.GREEN}{avg_metrics[key]}{color.END}")
+
+
     # saves the dataset to disk
+    dataset = dataset.rename_column("answer1", "model_answer")
+    dataset = dataset.rename_column("answer2", "expected")
     dataset.to_json(args.output)
 
 
