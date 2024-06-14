@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, BitsAndBytesConfig
 import argparse
 from datasets import load_dataset
 from peft import PeftModel
@@ -54,12 +54,23 @@ def get_mcq_options(samples):
     return {"question": questions, "options": options, "explanation": samples["explanation"], "correct_option": samples["answer"]}
 
 def load_sft_model(args):
+    if args.quantize:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    else:
+        bnb_config = None  # No quantization
+
     if args.is_base_peft and args.adapter_model_name is not None:
         model = AutoModelForCausalLM.from_pretrained(
             smallest_base,
             trust_remote_code=True,
             torch_dtype=torch.float32,
             device_map="auto",
+            quantization_config=bnb_config
         )
         
         model = PeftModel.from_pretrained(model, args.base_model_name)
@@ -76,6 +87,7 @@ def load_sft_model(args):
             # torch_dtype=torch.fp32,
             torch_dtype=torch.float32,
             device_map="auto",
+            quantization_config=bnb_config
         )
 
         print(model)
@@ -145,6 +157,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Seed")
     parser.add_argument("--dataset_name", type=str, default="datasets/test_dataset.jsonl")
     parser.add_argument("--random_idx", type=bool, default=False)
+    parser.add_argument("--quantize", type=bool, default=False)
 
     args = parser.parse_args()  
 
@@ -205,17 +218,28 @@ def main():
     #     diversity_penalty = 0.5,
     #     repetition_penalty = 1.2,
     # )
-
     generation_config = GenerationConfig(
         eos_token_id = tokenizer.eos_token_id,
         pad_token_id = tokenizer.pad_token_id,
-        do_sample=True,
-        max_new_tokens = 500,
-        temperature = 0.7,
-        top_p = 0.95,
-        top_k = 50,
+        num_beams = 10,
+        num_beam_groups = 5,
+        max_new_tokens = 1023,
+        diversity_penalty = 1.0,
         repetition_penalty = 1.2,
+        early_stopping=False,
+        no_repeat_ngram_size = 5
     )
+
+    # generation_config = GenerationConfig(
+    #     eos_token_id = tokenizer.eos_token_id,
+    #     pad_token_id = tokenizer.pad_token_id,
+    #     do_sample=True,
+    #     max_new_tokens = 500,
+    #     temperature = 0.7,
+    #     top_p = 0.95,
+    #     top_k = 50,
+    #     repetition_penalty = 1.2,
+    # )
 
     print("### GENERATION CONFIG ###########")
     print(generation_config)

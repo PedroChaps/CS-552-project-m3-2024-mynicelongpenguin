@@ -19,9 +19,11 @@ echo "Going to run..."
     # --is_base_peft True 
     # --base_model_name "pleaky2410/TeachersHateChatbots" \
     # --idx_question 12023 \
+    # --adapter_model_name "./models/train_sft/outputs/sft_model_3998_base"  \
+    # --quantize True
 python try_model.py --use_template True \
-    --adapter_model_name "./models/train_sft/outputs/sft_model_3998_base"  \
-    --random_idx True
+    --base_model_name "pleaky2410/TeachersHateChatbotsMCQ" \
+    --random_idx True 
 
 echo "Evaluator run"
 
