@@ -269,7 +269,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             attention_mask = attention_mask.to(self.pretrained_model.device)
 
             #Make sure there are no memory errors
-            max_batch_size = 4
+            max_batch_size = 1
             logits = []
             # start = time.time()
             for i in range(0, len(input_ids), max_batch_size):
@@ -519,8 +519,6 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 return padded_tensors
             #############################################################################################################################################
 
-            self.pretrained_model.to(torch.device("cuda"))
-
             processed_batch = get_mcq_options(batch)
             processed_batch_opts = processed_batch["options"]
             
@@ -539,7 +537,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 pad_token_id = tokenizer.pad_token_id,
                 num_beams = 10,
                 num_beam_groups = 5,
-                max_new_tokens = 1023,
+                max_new_tokens = 600,
                 diversity_penalty = 1.0,
                 repetition_penalty = 1.2,
                 early_stopping=False,
@@ -552,12 +550,12 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 pad_token_id = tokenizer.pad_token_id,
                 num_beams = 1,
                 repetition_penalty = 1.5,
-                max_new_tokens = 1023,
+                max_new_tokens = 600,
                 no_repeat_ngram_size = 5
             )
                 
             #do the generation in smaller batches to avoid OOM
-            batch_size = 2
+            batch_size = 1
             answer = []
             with torch.no_grad():
                 for i in range(0, len(all_input_ids), batch_size):
