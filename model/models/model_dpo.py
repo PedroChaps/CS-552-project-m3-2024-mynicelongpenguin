@@ -463,7 +463,6 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 """
                 bad_responses_input_ids = []
                 results = []
-                print(f"{answers[0] = }")
                 for i, answer in answers:
                     trigger = "### ANSWER\n" 
                     start_idx = answer.find(trigger)
@@ -519,19 +518,17 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                 return padded_tensors
             #############################################################################################################################################
 
+            print(f"\n{self.pretrained_model.device = }")
             processed_batch = get_mcq_options(batch)
             processed_batch_opts = processed_batch["options"]
             
             prompts = apply_template(processed_batch)
-
-            print(f"{prompts = }")
 
             #When running, I get the following warning, soemthing along the lines of: Please set the padding side to left for correct generation as this is a decoder-only model
             tokenizer.padding_side = "left"
             all_input_ids = tokenizer(prompts, padding=True, truncation=True, max_length = 1024,  return_tensors="pt", return_attention_mask=False).input_ids
 
             
-            #TODO: define best generation config
             generation_config = GenerationConfig(
                 eos_token_id = tokenizer.eos_token_id,
                 pad_token_id = tokenizer.pad_token_id,
@@ -577,12 +574,10 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             #extract answers
             results, bad_responses_input_ids = get_answers(all_input_ids, answers, processed_batch_opts)
 
-            # print(f"{results = }")
-
-            
             #if all the answers are well formed, we return
             if len(results) == len(answers):
                 results = [result[1] for result in results]
+                print(results)
                 return {"preds": results}
 
             #else, we try the failed ones with the fallback config
@@ -604,6 +599,7 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
                     max_idx = min(len(input_ids), i + batch_size)
                     answer.append(self.pretrained_model.generate(inputs=input_ids[i : max_idx].to(self.pretrained_model.device), generation_config=fallback_config, tokenizer=tokenizer))
             
+            input_ids = input_ids.cpu()
             #concatenate all tensors in one as if the generation was done in a full batch
             answer = [a.unsqueeze(0).detach().cpu() if a.dim() == 1 else a.detach().cpu() for a in answer]
 
@@ -619,8 +615,6 @@ class AutoDPOModelForCausalLM(PreTrainedModelWrapper):
             #get all the missing results (if not found again, we return 'A')
             results_bad_responses = get_answers(all_input_ids, answers, processed_batch_opts, force_answer=True)
             results += results_bad_responses
-            # print(f"{results_bad_responses = }")
-            # print(f"{results = }")
 
             assert len(results) == len(batch["question"])
 
