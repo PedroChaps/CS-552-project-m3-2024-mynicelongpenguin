@@ -1,18 +1,20 @@
 "team_name": "MyNiceLongPenguin" # Your team name
-"eval_method": ["reward"] # mcqa, reward, rag, compression
+"eval_method": ["mcqa", "quantiz"] # mcqa, reward, rag, compression, quantiz
 "task_type": "causal_lm" # causal_lm, seq2seq
-# "policy_model_path": "./checkpoints/dpo_model_40kdataset_default_confs/checkpoint-1000/"
-"policy_model_path": "pleaky2410/TeachersHateChatbots" # Your path to the final checkpoint
+"policy_model_path": "pleaky2410/TeachersHateChatbotsMCQ" # Your path to the final checkpoint
 "reference_model_path": "rhysjones/phi-2-orange-v2" # The repo id of your pretrained reference model
-"quantized_policy_model_path": "./checkpoints/best_model_quantized/" # Your path to the final quantized checkpoint
-"rag_policy_model_path": "./checkpoints/best_model_rag/" # Your path to the final RAG checkpoint
-"test_data_path": "../data/combined_test_min.jsonl" # Your path to the test data
+"quantized_policy_model_path": "pleaky2410/TeachersHateChatbotsMCQ-mini"
+# "rag_policy_model_path": "./checkpoints/best_model_rag/" # Your path to the final RAG checkpoint
+"test_data_path": "datasets/test_dataset_min.jsonl" # Your path to the test data
 "dpo_model_args": # Put any model arguments required to load your DPO model below
   "trust_remote_code": True
   "torch_dtype": "auto"
   "device_map": "auto"
-"rag_model_args": # Put any model arguments required to load your rag model below
-  "encoder_model_path": "facebook/bart-large"
-  "retriever_model_path": "./checkpoints/rag_retriever"
-  "document_dir": "./data/documents"
-"quantized_model_args": null # Put any model arguments required to load your quantized model below
+# "rag_model_args": # Put any model arguments required to load your rag model below
+#   "encoder_model_path": "facebook/bart-large"
+#   "retriever_model_path": "./checkpoints/rag_retriever"
+#   "document_dir": "./data/documents"
+"quantized_model_args": 
+  "trust_remote_code": True
+  "torch_dtype": "auto"
+  "device_map": "auto" # Put any model arguments required to load your quantized model below
