@@ -2,7 +2,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset
 import os
 import evaluate
 from requests import get
-from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, BitsAndBytesConfig
 from peft import PeftModel
 import torch
 import sys
@@ -127,11 +127,30 @@ def load_sft_model(args):
         model.load_adapter(args.adapter_model_name)
 
     else:
+        if args.bnb_config_type == 'nf4':
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16
+            )
+        elif args.bnb_config_type == 'fp4':
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="fp4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16
+            )
+        elif args.bnb_config_type == '8bit':
+            bnb_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_threshold=6.,
+            )
+
         model = AutoModelForCausalLM.from_pretrained(
             args.adapter_model_name if args.adapter_model_name else args.base_model_name,
-            # quantization_config=bnb_config,
+            quantization_config=bnb_config,
             trust_remote_code=True,
-            # torch_dtype=torch.fp32,
             torch_dtype=torch.float32,
             device_map="auto",
         )
@@ -316,6 +335,7 @@ def main():
     parser.add_argument("--sample_quantity", type=int, default=None, help="Amount of samples to use for evaluation. If not set, use all")
     parser.add_argument("--get_average_metrics", type=bool, default=False, help="Given metrics file, get average metrics")
     parser.add_argument("--metrics_files", type=str, default=None, help="Comma separated metrics file name")
+    parser.add_argument("--bnb_config_type", type=str, choices=['nf4', 'fp4', '8bit'], default='nf4', help="Select the BitsAndBytes configuration type (nf4, fp4, or 8bit)")
 
     args = parser.parse_args()
 

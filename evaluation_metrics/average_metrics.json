@@ -34,5 +34,41 @@
         "BERTScore_P": 0.856225931644,
         "BERTScore_R": 0.8513828456404999,
         "BERTScore_F1": 0.8519463613625007
+    },
+    "4bit_quant_model_eval_metrics.json": {
+        "ROUGE-1": 0.7141219140370003,
+        "ROUGE-2": 0.6370921655,
+        "ROUGE-L": 0.6924393472090001,
+        "BLEU": 0.5444766066269999,
+        "BERTScore_P": 0.8526336732470002,
+        "BERTScore_R": 0.8445151060795,
+        "BERTScore_F1": 0.8464012095360003
+    },
+    "4bit_nf4_quant_model_eval_metrics.json": {
+        "ROUGE-1": 0.7240472828899996,
+        "ROUGE-2": 0.6426739429424998,
+        "ROUGE-L": 0.6981316365405,
+        "BLEU": 0.5645368027285002,
+        "BERTScore_P": 0.8528816327444999,
+        "BERTScore_R": 0.8487878105004998,
+        "BERTScore_F1": 0.8491667962050005
+    },
+    "8bit_quant_model_eval_metrics.json": {
+        "ROUGE-1": 0.737102159569,
+        "ROUGE-2": 0.6556692942804997,
+        "ROUGE-L": 0.7143333325104997,
+        "BLEU": 0.5673136527234999,
+        "BERTScore_P": 0.8644299294085005,
+        "BERTScore_R": 0.8525041940844997,
+        "BERTScore_F1": 0.8569802114380003
+    },
+    "sft_final_model_default_merged.json": {
+        "ROUGE-1": 0.7235042290625,
+        "ROUGE-2": 0.6419825667694997,
+        "ROUGE-L": 0.6979793805305001,
+        "BLEU": 0.5593018046889999,
+        "BERTScore_P": 0.8528869161004999,
+        "BERTScore_R": 0.8489466738669997,
+        "BERTScore_F1": 0.8492686653100001
     }
 }
